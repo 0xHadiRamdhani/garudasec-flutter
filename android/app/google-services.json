@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "206621925220",
+    "project_id": "garudasec-dfa1e",
+    "storage_bucket": "garudasec-dfa1e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:206621925220:android:d6ab1ea7e33766ba37a471",
+        "android_client_info": {
+          "package_name": "com.example.garudasec"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBh9BOmeGGYHmEWtZDSQ7SgzOgat1NctTI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

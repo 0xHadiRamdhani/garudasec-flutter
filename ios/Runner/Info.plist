@@ -47,5 +47,11 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Authenticate to access secure chats</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Select profile photo from library</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Capture profile photo</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Capture audio for video</string>
 </dict>
 </plist>

@@ -1,7 +1,36 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
+
+  // ... (existing methods)
+
+  // Update User Profile
+  Future<void> updateUserProfile(
+    String uid, {
+    String? username,
+    String? photoUrl,
+  }) async {
+    final Map<String, dynamic> data = {};
+    if (username != null) data['username'] = username;
+    if (photoUrl != null) data['photo_url'] = photoUrl;
+
+    if (data.isNotEmpty) {
+      await _db.collection('users').doc(uid).update(data);
+    }
+  }
+
+  // Upload Profile Image
+  Future<String> uploadProfileImage(String uid, File imageFile) async {
+    final ref = _storage.ref().child('user_profiles').child('$uid.jpg');
+    final uploadTask = ref.putFile(imageFile);
+    final snapshot = await uploadTask;
+
+    return await snapshot.ref.getDownloadURL();
+  }
 
   // Save user profile with Public Key
   Future<void> saveUser(

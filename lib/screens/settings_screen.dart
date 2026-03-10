@@ -1,10 +1,14 @@
+import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import '../services/auth_service.dart';
 import '../services/security_service.dart';
+import '../services/database_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,14 +21,125 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _auth = FirebaseAuth.instance;
   final _storage = const FlutterSecureStorage();
   final _securityService = SecurityService();
+  final _dbService = DatabaseService();
+  final _imagePicker = ImagePicker();
 
   bool _biometricEnabled = true;
   String _publicKeyShort = "Loading...";
+
+  // Profile State
+  bool _isLoadingProfile = true;
+  String? _username;
+  String? _photoUrl;
+  File? _newProfileImage;
+  final _usernameController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadUserProfile();
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadUserProfile() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (doc.exists && mounted) {
+          setState(() {
+            _username = doc.data()?['username'];
+            _photoUrl = doc.data()?['photo_url'];
+            _usernameController.text = _username ?? '';
+            _isLoadingProfile = false;
+          });
+        } else {
+          if (mounted) setState(() => _isLoadingProfile = false);
+        }
+      } catch (e) {
+        debugPrint("Error loading profile: $e");
+        if (mounted) setState(() => _isLoadingProfile = false);
+      }
+    } else {
+      if (mounted) setState(() => _isLoadingProfile = false);
+    }
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      debugPrint("Attempting to pick image...");
+      final pickedFile = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        requestFullMetadata: false,
+      );
+
+      if (pickedFile != null) {
+        debugPrint("Image picked successfully: ${pickedFile.path}");
+        setState(() {
+          _newProfileImage = File(pickedFile.path);
+        });
+      } else {
+        debugPrint("Image picking cancelled by user");
+      }
+    } catch (e) {
+      debugPrint("EXCEPTION picking image: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    setState(() => _isLoadingProfile = true);
+
+    try {
+      String? newPhotoUrl;
+      if (_newProfileImage != null) {
+        newPhotoUrl = await _dbService.uploadProfileImage(
+          user.uid,
+          _newProfileImage!,
+        );
+      }
+
+      await _dbService.updateUserProfile(
+        user.uid,
+        username: _usernameController.text.trim(),
+        photoUrl: newPhotoUrl,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Profile updated successfully")),
+        );
+        setState(() {
+          if (newPhotoUrl != null) _photoUrl = newPhotoUrl;
+          _username = _usernameController.text.trim();
+          _newProfileImage = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error updating profile: $e")));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingProfile = false);
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -33,9 +148,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (mounted) {
       setState(() {
-        _biometricEnabled = bioParams != 'false'; // Default to true if not set
+        _biometricEnabled = bioParams != 'false';
         if (key != null) {
-          // Remove PEM headers for cleaner display
           final cleanKey = key
               .replaceAll('-----BEGIN PUBLIC KEY-----', '')
               .replaceAll('-----END PUBLIC KEY-----', '')
@@ -64,21 +178,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Redefining build to include profile editing
     final user = _auth.currentUser;
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Settings")),
+      appBar: AppBar(
+        title: const Text("Settings"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _isLoadingProfile ? null : _saveProfile,
+          ),
+        ],
+      ),
       body: ListView(
         children: [
           _buildSectionHeader("Identity"),
-          ListTile(
-            leading: CircleAvatar(
-              backgroundColor: Colors.redAccent.withValues(alpha: 0.2),
-              child: const Icon(
-                CupertinoIcons.person_fill,
-                color: Colors.redAccent,
+          Center(
+            child: Stack(
+              children: [
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: CircleAvatar(
+                    radius: 50,
+                    backgroundColor: Colors.redAccent.withValues(alpha: 0.2),
+                    backgroundImage: _newProfileImage != null
+                        ? FileImage(_newProfileImage!)
+                        : (_photoUrl != null ? NetworkImage(_photoUrl!) : null)
+                              as ImageProvider?,
+                    child: (_newProfileImage == null && _photoUrl == null)
+                        ? const Icon(
+                            CupertinoIcons.person_fill,
+                            size: 50,
+                            color: Colors.redAccent,
+                          )
+                        : null,
+                  ),
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.redAccent,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.edit,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: TextField(
+              controller: _usernameController,
+              decoration: const InputDecoration(
+                labelText: "Username",
+                prefixIcon: Icon(CupertinoIcons.person),
               ),
             ),
+          ),
+          ListTile(
             title: Text(user?.email ?? "Unknown"),
             subtitle: Text("UID: ${user?.uid.substring(0, 8)}..."),
             trailing: IconButton(
@@ -93,7 +260,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               CupertinoIcons.lock_shield,
               color: Colors.redAccent,
             ),
-            activeColor: Colors.redAccent,
+            // activeColor removed (deprecated), relies on Theme
             title: const Text("Biometric Lock"),
             subtitle: const Text("Require authentication on startup"),
             value: _biometricEnabled,
@@ -109,9 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _publicKeyShort,
               style: const TextStyle(fontFamily: 'Courier', fontSize: 12),
             ),
-            onTap: () {
-              // Could show full key dialog here
-            },
+            onTap: () {},
           ),
 
           _buildSectionHeader("Application"),
@@ -130,9 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Navigator.of(context).popUntil((route) => route.isFirst);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(
-                  0xFF330000,
-                ), // Darker red for danger
+                backgroundColor: const Color(0xFF330000),
                 foregroundColor: Colors.redAccent,
                 side: const BorderSide(color: Colors.redAccent),
                 padding: const EdgeInsets.symmetric(vertical: 16),
